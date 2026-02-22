@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCM Metric Calculator (Offline)</title>
+    <!-- Load Tailwind CSS from CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Configure Tailwind to support dark mode via the 'class' strategy
+        tailwind.config = {
+          darkMode: 'class',
+          theme: {
+            extend: {
+              fontFamily: {
+                sans: ['Inter', 'sans-serif'],
+              },
+            }
+          }
+        }
+    </script>
+    <!-- Load React, ReactDOM, and Babel for JSX support -->
+    <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Load html2canvas for JPEG export functionality -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        /* Define Inter font as requested */
+        :root {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for better look in modals */
+        .max-h-\[90vh\]::-webkit-scrollbar {
+            width: 8px;
+        }
+        .max-h-\[90vh\]::-webkit-scrollbar-thumb {
+            background-color: #9ca3af;
+            border-radius: 4px;
+        }
+        /* Ensure table content on mobile is readable by allowing horizontal scroll */
+        .overflow-x-auto table {
+            min-width: 800px; /* Ensures minimum width for data density with new columns */
+        }
+        /* Animation for the notification bar */
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translate(-50%, -20px); }
+            10% { opacity: 1; transform: translate(-50%, 0); }
+            90% { opacity: 1; transform: translate(-50%, 0); }
+            100% { opacity: 0; transform: translate(-50%, -20px); }
+        }
+        .animate-fadeInOut {
+            animation: fadeInOut 7s ease-in-out forwards;
+        }
+        /* Tailwind sr-only equivalent for hiding the file input */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        /* Styling for the custom theme switch */
+        .theme-switch {
+            width: 48px;
+            height: 24px;
+            background-color: #3b82f6; /* Blue for light/sun side */
+            border-radius: 9999px;
+            cursor: pointer;
+            position: relative;
+            transition: background-color 0.3s;
+        }
+        .theme-switch-thumb {
+            width: 20px;
+            height: 20px;
+            background-color: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s, background-color 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+        .theme-switch.dark {
+            background-color: #4b5563; /* Gray for dark/moon side */
+        }
+        .theme-switch.dark .theme-switch-thumb {
+            transform: translateX(24px); /* Move 24px to the right (48-2-20-2 = 24) */
+            background-color: #fcd34d; /* Yellow for moon/dark mode */
+        }
+        /* Moon/Sun icon styling using simple emoji/text */
+        .sun-icon { color: #f97316; font-size: 14px; }
+        .moon-icon { color: #1f2937; font-size: 14px; }
+    </style>
+</head>
+<body class="transition-colors duration-500">
+    <div id="root">
+        <!-- React component will render here -->
+    </div>
+
+    <!-- Application Logic in JSX/Babel -->
+    <script type="text/babel">
+        const { useState, useCallback, useMemo, useRef, useEffect } = React;
+
+        // === Constants for Local Storage ===
+        const STORAGE_KEY = 'GCM_METRICS_DATA'; // Key for metric data
+        const THEME_KEY = 'GCM_THEME_PREF';     // Key for theme preference
+
+
+        // === Helper Functions and Initial State ===
+
+        const initialMetricValue = '';
+        
+        /**
+         * Creates a new group object with initial values.
+         */
+        const createNewGroup = (groupIndex) => ({
+          id: `G${groupIndex}-${Date.now()}`, // Unique ID for stability
+          name: `${groupIndex}`,
+          tthIn: initialMetricValue, 
+          tthOut: initialMetricValue,
+          tthLBL: initialMetricValue, 
+          tthCode: initialMetricValue, 
+          tth107: initialMetricValue, 
+          tthVisit: initialMetricValue, 
+          ssLBL: initialMetricValue, 
+          ssCode: initialMetricValue, 
+          ss107: initialMetricValue, 
+          ssVisit: initialMetricValue, 
+        });
+        
+        /**
+         * Loads initial state from localStorage, or returns default if not found.
+         */
+        const loadInitialGroups = () => {
+            try {
+                const storedData = localStorage.getItem(STORAGE_KEY);
+                if (storedData) {
+                    const parsedData = JSON.parse(storedData);
+                    if (Array.isArray(parsedData) && parsedData.length > 0) {
+                        // Ensure data integrity: load stored data, but apply new defaults if needed
+                        return parsedData.map((group, index) => ({
+                            ...createNewGroup(index + 1), // Get all default keys/structure
+                            ...group, // Overwrite with stored values
+                            // Ensure ID exists, falls back to a temporary one if storage missed it
+                            id: group.id || `G${index + 1}-${Date.now() + index}`,
+                            name: group.name || `${index + 1}`
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.error("Error loading data from localStorage, falling back to default:", e);
+                // Fallback to default state on error
+            }
+            return [createNewGroup(1)];
+        };
+
+
+        /**
+         * Core calculation logic.
+         */
+        const calculateGroupMetrics = (group) => {
+          const getNum = (val) => parseFloat(val) || 0; 
+          
+          const lblNumericValue = getNum(group.tthLBL); 
+          // SS LBL is derived from TTH LBL in this context
+          const ssLBLNumeric = lblNumericValue; 
+
+          const tthNLBL = lblNumericValue + getNum(group.tthIn) - getNum(group.tthOut);
+          const ssNLBL = tthNLBL;
+
+          const calculateGrpPercent = (code, lbl) => {
+            // Check for division by zero
+            return lbl === 0 ? 0 : (code / lbl) * 100;
+          };
+
+          const tthGrpPercent = calculateGrpPercent(getNum(group.tthCode), lblNumericValue);
+          const ssGrpPercent = calculateGrpPercent(getNum(group.ssCode), ssLBLNumeric);
+
+          // Calculate PGPR as the average of the two group percentages
+          const pgprPercent = (tthGrpPercent + ssGrpPercent) / 2;
+
+          return {
+            ...group,
+            ssLBL: ssLBLNumeric, 
+            tthNLBL, 
+            ssNLBL,  
+            tthGrpPercent,
+            ssGrpPercent,
+            pgprPercent,
+          };
+        };
+
+        /**
+         * Simple CSV parser.
+         */
+        const parseCSV = (csvText) => {
+          try {
+              const [headerLine, ...dataLines] = csvText.trim().split('\n');
+              
+              if (!headerLine || headerLine.split(',').length < 7) {
+                  console.error("CSV Parse Error: Expected at least 7 columns on each data row.");
+                  return null;
+              }
+
+              const newGroups = [];
+              dataLines.forEach((line, index) => {
+                  // Simple split by comma, allowing for trim and empty values
+                  const values = line.split(',').map(v => v.trim()); 
+                  
+                  if (values.length >= 7) { 
+                      const groupIndex = index + 1;
+                      // Detect if it's the old format (fewer columns) or new format (with 107 and Visit)
+                      const isNewFormat = values.length >= 14;
+                      
+                      const newGroup = {
+                          id: `G${groupIndex}-${Date.now() + index}`,
+                          name: values[0] || `${groupIndex}`,
+                          tthIn: values[1] || '',     
+                          tthOut: values[2] || '',    
+                          tthLBL: values[3] || '',    
+                          tthCode: values[5] || '',   
+                          tth107: isNewFormat ? (values[6] || '') : '',
+                          tthVisit: isNewFormat ? (values[7] || '') : '',
+                          ssCode: isNewFormat ? (values[8] || '') : (values[6] || ''),    
+                          ss107: isNewFormat ? (values[9] || '') : '',
+                          ssVisit: isNewFormat ? (values[10] || '') : '',
+                          ssLBL: '',                  
+                      };
+                      newGroups.push(newGroup);
+                  }
+              });
+
+              return newGroups.length > 0 ? newGroups : null;
+          } catch (error) {
+              console.error("CSV Parsing Error:", error.message);
+              return null;
+          }
+        };
+
+
+        // === Components ===
+        
+        const Notification = ({ message, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 7000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            // Simple HTML parsing for bold/new lines in message
+            const formattedMessage = message.split('\n').map((line, index, array) => (
+                <React.Fragment key={index}>
+                    <span dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                    {index < array.length - 1 && <br />}
+                </React.Fragment>
+            ));
+
+            return (
+                <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-blue-700 dark:bg-blue-600 text-white p-4 rounded-lg shadow-2xl flex items-center max-w-lg w-full transition duration-300 animate-fadeInOut text-sm text-left">
+                    <span className="flex-grow font-medium">{formattedMessage}</span>
+                    <button onClick={onClose} className="ml-4 text-white hover:text-gray-200 text-xl leading-none" title="Dismiss">&times;</button>
+                </div>
+            );
+        };
+
+
+        const DataTable = React.memo(({ groups, tableType, updateGroupValue, deleteGroup, totals }) => {
+          const isTTH = tableType === 'TTH';
+          const dataPrefix = isTTH ? 'tth' : 'ss';
+          const codeLabel = isTTH ? 'T.Code' : 'S.Code';
+
+          // Define responsive column widths
+          const colWidths = useMemo(() => {
+            const group = "w-[10%] min-w-[70px]"; 
+            const deleteBtn = "w-[3%] min-w-[30px]"; 
+            
+            if (isTTH) {
+              const standardCol = "w-[9%] min-w-[70px]";
+              return { group, deleteBtn, inOut: standardCol, lbl: standardCol, nlbl: standardCol, code: standardCol, extra: standardCol, grp: standardCol };
+            } else {
+              const wide = "w-[12%] min-w-[80px]";
+              return { group, deleteBtn, lbl: wide, nlbl: wide, code: wide, extra: wide, grp: wide };
+            }
+          }, [isTTH]);
+
+          const totalGrpPercent = useMemo(() => {
+            if (totals.newDataTotal === 0) return 0;
+            const codeTotal = isTTH ? totals.tthCode : totals.ssCode;
+            return (codeTotal / totals.newDataTotal) * 100;
+          }, [totals, isTTH]);
+
+          return (
+            <div className="overflow-x-auto shadow-xl rounded-xl bg-white dark:bg-gray-800 p-4">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-700"><tr>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.group} sticky left-0 z-10 bg-gray-50 dark:bg-gray-700`}>Group</th>
+                    {isTTH && <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.inOut}`}>IN</th>}
+                    {isTTH && <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.inOut}`}>OUT</th>}
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.lbl}`}>Old Data</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.nlbl}`}>New Data</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.code}`}>{codeLabel}</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.extra}`}>107</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.extra}`}>Visit</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.grp}`}>GRP%</th>
+                    <th className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${colWidths.deleteBtn}`}></th>
+                  </tr></thead>
+                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">{groups.map((group) => (
+                    <tr key={group.id} className="group hover:bg-blue-50/50 dark:hover:bg-gray-700 transition duration-150">
+                      
+                      <td className={`px-2 py-1 ${colWidths.group} sticky left-0 z-10 bg-white dark:bg-gray-800 group-hover:bg-blue-50/50 dark:group-hover:bg-gray-700`}>
+                        <input type="number" value={group.name} onChange={(e) => updateGroupValue(group.id, 'name', e.target.value)}
+                            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 font-sans bg-gray-50 dark:bg-gray-900 dark:text-gray-100" />
+                      </td>
+                      
+                      {isTTH && <td className={`px-2 py-1 ${colWidths.inOut}`}><input type="number" value={group.tthIn} onChange={(e) => updateGroupValue(group.id, 'tthIn', e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 dark:bg-gray-900 dark:text-gray-100" /></td>}
+                      {isTTH && <td className={`px-2 py-1 ${colWidths.inOut}`}><input type="number" value={group.tthOut} onChange={(e) => updateGroupValue(group.id, 'tthOut', e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 dark:bg-gray-900 dark:text-gray-100" /></td>}
+                      
+                      <td className={`px-2 py-1 ${colWidths.lbl}`}>
+                        <input type={isTTH ? "number" : "text"} 
+                          value={isTTH ? group.tthLBL : group.ssLBL.toLocaleString()} 
+                          readOnly={!isTTH} disabled={!isTTH} 
+                          onChange={isTTH ? (e) => updateGroupValue(group.id, 'tthLBL', e.target.value) : undefined}
+                          className={`w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm ${isTTH ? 'bg-blue-50 dark:bg-blue-900/50 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-100' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-not-allowed'} transition duration-150 font-mono`} />
+                      </td>
+                      
+                      <td className={`px-2 py-1 ${colWidths.nlbl}`}>
+                        <input type="text" value={group[`${dataPrefix}NLBL`].toLocaleString()} readOnly disabled
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm bg-purple-100 dark:bg-purple-900/50 text-gray-900 dark:text-gray-100 font-bold cursor-not-allowed transition duration-150 font-mono" />
+                      </td>
+                      
+                      <td className={`px-2 py-1 ${colWidths.code}`}>
+                        <input type="number" value={group[`${dataPrefix}Code`]} 
+                          onChange={(e) => updateGroupValue(group.id, `${dataPrefix}Code`, e.target.value)}
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm bg-yellow-50 dark:bg-yellow-900/50 focus:ring-blue-500 focus:border-blue-500 transition duration-150 dark:text-gray-100" />
+                      </td>
+
+                      <td className={`px-2 py-1 ${colWidths.extra}`}>
+                        <input type="number" value={group[`${dataPrefix}107`]} 
+                          onChange={(e) => updateGroupValue(group.id, `${dataPrefix}107`, e.target.value)}
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 dark:bg-gray-900 dark:text-gray-100" />
+                      </td>
+                      
+                      <td className={`px-2 py-1 ${colWidths.extra}`}>
+                        <input type="number" value={group[`${dataPrefix}Visit`]} 
+                          onChange={(e) => updateGroupValue(group.id, `${dataPrefix}Visit`, e.target.value)}
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 transition duration-150 dark:bg-gray-900 dark:text-gray-100" />
+                      </td>
+                      
+                      <td className={`px-2 py-2 whitespace-nowrap font-bold ${colWidths.grp} ${group[`${dataPrefix}GrpPercent`] >= 100 ? 'text-green-500' : 'text-red-500'} dark:text-gray-100`}>
+                        {group[`${dataPrefix}GrpPercent`].toFixed(2)}%
+                      </td>
+                      
+                      <td className={`px-2 py-2 whitespace-nowrap text-center ${colWidths.deleteBtn}`}>
+                        <button onClick={() => deleteGroup(group.id)} disabled={groups.length === 1}
+                          className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xl font-bold disabled:opacity-30 disabled:cursor-not-allowed transition duration-150 leading-none"
+                          title={`Delete group ${group.name}`} aria-label={`Delete group ${group.name}`}>&times;</button>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                <tfoot className="bg-gray-100 dark:bg-gray-700 border-t-2 border-gray-300 dark:border-gray-600 font-bold">
+                  <tr>
+                    <td className={`px-2 py-3 text-left text-sm text-gray-800 dark:text-gray-100 uppercase ${colWidths.group} sticky left-0 z-10 bg-gray-100 dark:bg-gray-700`}>TOTAL</td>
+                    {isTTH && <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.inOut}`}>{totals.tthIn.toLocaleString()}</td>}
+                    {isTTH && <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.inOut}`}>{totals.tthOut.toLocaleString()}</td>}
+                    <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.lbl}`}>{totals.oldDataTotal.toLocaleString()}</td>
+                    <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.nlbl}`}>{totals.newDataTotal.toLocaleString()}</td>
+                    <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.code}`}>
+                      {isTTH ? totals.tthCode.toLocaleString() : totals.ssCode.toLocaleString()}
+                    </td>
+                    <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.extra}`}>
+                      {totals[`${dataPrefix}107`].toLocaleString()}
+                    </td>
+                    <td className={`px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${colWidths.extra}`}>
+                      {totals[`${dataPrefix}Visit`].toLocaleString()}
+                    </td>
+                    <td className={`px-2 py-3 text-sm font-bold whitespace-nowrap ${colWidths.grp} ${totalGrpPercent >= 100 ? 'text-green-500' : 'text-red-500'}`}>
+                      {totalGrpPercent.toFixed(2)}%
+                    </td>
+                    <td className={`px-2 py-3 ${colWidths.deleteBtn}`}></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        });
+
+        const PGPRTable = React.memo(({ groups, totals }) => {
+            const totalTthGrpPercent = useMemo(() => {
+                if (totals.newDataTotal === 0) return 0;
+                return (totals.tthCode / totals.newDataTotal) * 100;
+            }, [totals]);
+
+            const totalSsGrpPercent = useMemo(() => {
+                if (totals.newDataTotal === 0) return 0;
+                return (totals.ssCode / totals.newDataTotal) * 100;
+            }, [totals]);
+
+            const totalPgprPercent = useMemo(() => {
+                return (totalTthGrpPercent + totalSsGrpPercent) / 2;
+            }, [totalTthGrpPercent, totalSsGrpPercent]);
+
+            return (
+              <div className="overflow-x-auto shadow-xl rounded-xl bg-white dark:bg-gray-800 p-4">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-700"><tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider w-1/4 min-w-[80px]">Group</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider w-1/4 min-w-[80px]">TTH GRP%</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider w-1/4 min-w-[80px]">SS GRP%</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider w-1/4 min-w-[100px]">PGPR% (Avg GRP%)</th>
+                  </tr></thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">{groups.map((group) => (
+                    <tr key={group.id} className="hover:bg-blue-50/50 dark:hover:bg-gray-700 transition duration-150">
+                      <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900 dark:text-gray-100 w-1/4">{group.name}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-200 w-1/4">{group.tthGrpPercent.toFixed(2)}%</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-200 w-1/4">{group.ssGrpPercent.toFixed(2)}%</td>
+                      <td className="px-6 py-4 whitespace-nowrap font-bold text-blue-600 dark:text-blue-400 w-1/4">
+                        {group.pgprPercent.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                  <tfoot className="bg-gray-100 dark:bg-gray-700 border-t-2 border-gray-300 dark:border-gray-600 font-bold">
+                    <tr>
+                      <td className="px-6 py-3 text-left text-sm text-gray-800 dark:text-gray-100 uppercase">TOTAL</td>
+                      <td className="px-6 py-3 text-sm text-gray-800 dark:text-gray-100">{totalTthGrpPercent.toFixed(2)}%</td>
+                      <td className="px-6 py-3 text-sm text-gray-800 dark:text-gray-100">{totalSsGrpPercent.toFixed(2)}%</td>
+                      <td className="px-6 py-3 text-sm font-bold text-blue-600 dark:text-blue-400">{totalPgprPercent.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            );
+        });
+
+        const AllDataTable = React.memo(({ groups, totals }) => {
+            const cols = [
+                { key: 'name', label: 'Group', isPercent: false, isBold: true, className: "font-semibold min-w-[70px]" },
+                { key: 'tthIn', label: 'IN', isPercent: false, className: "min-w-[60px]" },
+                { key: 'tthOut', label: 'OUT', isPercent: false, className: "min-w-[60px]" },
+                { key: 'tthLBL', label: 'Old Data (LBL)', isPercent: false, className: "min-w-[80px]" },
+                { key: 'tthNLBL', label: 'New Data (NLBL)', isPercent: false, isDerived: true, className: "min-w-[80px] bg-purple-50 dark:bg-purple-900/30" },
+                { key: 'tthCode', label: 'T.Code', isPercent: false, className: "min-w-[60px]" },
+                { key: 'tth107', label: 'TTH 107', isPercent: false, className: "min-w-[60px]" },
+                { key: 'tthVisit', label: 'TTH Visit', isPercent: false, className: "min-w-[60px]" },
+                { key: 'ssCode', label: 'S.Code', isPercent: false, className: "min-w-[60px]" },
+                { key: 'ss107', label: 'SS 107', isPercent: false, className: "min-w-[60px]" },
+                { key: 'ssVisit', label: 'SS Visit', isPercent: false, className: "min-w-[60px]" },
+                { key: 'tthGrpPercent', label: 'TTH GRP%', isPercent: true, isDerived: true, className: "min-w-[70px]" },
+                { key: 'ssGrpPercent', label: 'SS GRP%', isPercent: true, isDerived: true, className: "min-w-[70px]" },
+                { key: 'pgprPercent', label: 'PGPR%', isPercent: false, isDerived: true, className: "min-w-[70px] font-bold text-blue-600 dark:text-blue-400" },
+            ];
+
+            const getCellValue = (group, key) => {
+                const value = group[key];
+                if (typeof value === 'string') {
+                    return value || '0';
+                }
+                if (typeof value === 'number') {
+                    if (key === 'pgprPercent') return value.toFixed(2);
+                    if (key.endsWith('GrpPercent')) return value.toFixed(2) + '%'; 
+                    return value.toLocaleString();
+                }
+                return value;
+            };
+            
+            const totalMap = {
+                tthIn: 'tthIn', tthOut: 'tthOut', 
+                tthLBL: 'oldDataTotal', tthNLBL: 'newDataTotal', 
+                tthCode: 'tthCode', ssCode: 'ssCode',
+                tth107: 'tth107', tthVisit: 'tthVisit',
+                ss107: 'ss107', ssVisit: 'ssVisit'
+            };
+
+            const totalTthGrpPercent = useMemo(() => {
+                if (totals.newDataTotal === 0) return 0;
+                return (totals.tthCode / totals.newDataTotal) * 100;
+            }, [totals]);
+
+            const totalSsGrpPercent = useMemo(() => {
+                if (totals.newDataTotal === 0) return 0;
+                return (totals.ssCode / totals.newDataTotal) * 100;
+            }, [totals]);
+
+            const totalPgprPercent = useMemo(() => {
+                return (totalTthGrpPercent + totalSsGrpPercent) / 2;
+            }, [totalTthGrpPercent, totalSsGrpPercent]);
+
+            return (
+                <div className="overflow-x-auto shadow-xl rounded-xl bg-white dark:bg-gray-800 p-4">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-700"><tr>
+                            {cols.map(col => (
+                                <th key={col.key} className={`px-2 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-200 uppercase tracking-wider ${col.className}`}>
+                                    {col.label}
+                                </th>
+                            ))}
+                        </tr></thead>
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">{groups.map((group) => (
+                            <tr key={group.id} className="hover:bg-blue-50/50 dark:hover:bg-gray-700 transition duration-150">
+                                {cols.map(col => (
+                                    <td key={`${group.id}-${col.key}`} 
+                                        className={`px-2 py-2 whitespace-nowrap text-sm ${col.isBold ? 'font-bold' : ''} ${col.className} 
+                                            ${col.isPercent && parseFloat(group[col.key]) >= 100 ? 'text-green-500' : 
+                                            col.isPercent && parseFloat(group[col.key]) < 100 ? 'text-red-500' : 
+                                            'text-gray-900 dark:text-gray-100'}`
+                                        }
+                                    >
+                                        {getCellValue(group, col.key)}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}</tbody>
+                        
+                        <tfoot className="bg-gray-100 dark:bg-gray-700 border-t-2 border-gray-300 dark:border-gray-600 font-bold">
+                            <tr>
+                                {cols.map(col => {
+                                    const totalKey = totalMap[col.key];
+                                    let value = '';
+                                    let finalClassName = `px-2 py-3 text-sm text-gray-800 dark:text-gray-100 ${col.className || ''}`;
+                                    
+                                    if (totalKey) {
+                                        value = totals[totalKey].toLocaleString();
+                                    } else if (col.key === 'name') {
+                                        value = 'TOTAL';
+                                    } else if (col.key === 'tthGrpPercent') {
+                                        value = totalTthGrpPercent.toFixed(2) + '%';
+                                        finalClassName += totalTthGrpPercent >= 100 ? ' text-green-500' : ' text-red-500';
+                                    } else if (col.key === 'ssGrpPercent') {
+                                        value = totalSsGrpPercent.toFixed(2) + '%';
+                                        finalClassName += totalSsGrpPercent >= 100 ? ' text-green-500' : ' text-red-500';
+                                    } else if (col.key === 'pgprPercent') {
+                                        value = totalPgprPercent.toFixed(2);
+                                    }
+
+                                    return (
+                                        <td key={`total-${col.key}`} className={finalClassName}>
+                                            {value}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            );
+        });
+
+
+        const ViewAllDataModal = ({ groups, totals, onClose }) => (
+          <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-start mb-4 border-b dark:border-gray-700 pb-3">
+                <h3 className="text-2xl font-bold text-blue-700 dark:text-blue-400">All Data View (Comprehensive)</h3>
+                <button onClick={onClose} className="text-3xl text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 leading-none" title="Close">&times;</button>
+              </div>
+              
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">This table shows all input and calculated data points side-by-side:</p>
+              
+              <AllDataTable groups={groups} totals={totals} />
+
+              <div className="flex justify-center mt-6">
+                <button onClick={onClose} className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">
+                  Close View
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        
+        // Theme Switch Component
+        const ThemeSwitch = ({ theme, toggleTheme }) => (
+            <div className="flex items-center space-x-2">
+                <button onClick={toggleTheme} className={`theme-switch ${theme}`} aria-label="Toggle Theme">
+                    <div className="theme-switch-thumb">
+                        {theme === 'light' ? (
+                            <span className="sun-icon" role="img" aria-label="sun">☀️</span>
+                        ) : (
+                            <span className="moon-icon" role="img" aria-label="moon">🌙</span>
+                        )}
+                    </div>
+                </button>
+            </div>
+        );
+
+
+        // --- Component for image capture, rendered off-screen ---
+        const DataForExport = React.forwardRef(({ groups, totals, theme }, ref) => (
+            <div 
+                ref={ref} 
+                id="data-for-export"
+                // Ensure sufficient width for good JPEG quality capture
+                className={`p-10 w-[1600px] font-sans transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'}`}
+            >
+                <div className="mb-8">
+                    <h1 className="text-3xl font-extrabold text-blue-700 dark:text-blue-400 mb-2">GCM Metric Calculator - Comprehensive Report</h1>
+                    <p className="text-sm font-mono text-gray-600 dark:text-gray-400">Report Generated: {new Date().toLocaleString()}</p>
+                </div>
+                <AllDataTable groups={groups} totals={totals} />
+            </div>
+        ));
+        // --- END COMPONENT ---
+
+
+        // === METRIC CALCULATOR APP (Now the main application) ===
+        const MetricApp = () => {
+          // --- THEME STATE (Moved here from AuthApp) ---
+          const [theme, setTheme] = useState(localStorage.getItem(THEME_KEY) || 'light');
+            
+          const toggleTheme = useCallback(() => {
+              setTheme(prevTheme => {
+                  const newTheme = prevTheme === 'light' ? 'dark' : 'light';
+                  localStorage.setItem(THEME_KEY, newTheme);
+                  return newTheme;
+              });
+          }, []);
+
+          // Apply dark class to the HTML element and manage body background
+          useEffect(() => {
+              if (theme === 'dark') {
+                  document.documentElement.classList.add('dark');
+              } else {
+                  document.documentElement.classList.remove('dark');
+              }
+              // Set body background based on the theme
+              document.body.classList.toggle('bg-gray-900', theme === 'dark');
+              document.body.classList.toggle('bg-gray-50', theme === 'light');
+          }, [theme]);
+          // --- END THEME STATE ---
+
+
+          // Initialize state by trying to load from localStorage first
+          const [groups, setGroups] = useState(loadInitialGroups); 
+          const [activeTab, setActiveTab] = useState('TTH');
+          const [isClearConfirming, setIsClearConfirming] = useState(false);
+          const [isViewingAllData, setIsViewingAllData] = useState(false);
+          
+          // Ref for capturing the comprehensive table for JPEG export
+          const dataToCaptureRef = useRef(null); 
+          const [exportStatus, setExportStatus] = useState(null); // State for notifications
+
+
+          // --- LOCAL STORAGE EFFECT (Groups) ---
+          useEffect(() => {
+              try {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+              } catch (e) {
+                  console.error("Error saving data to localStorage:", e);
+                  setExportStatus("Warning: Could not save data to local storage. Your browser may be in private mode or storage limit reached.");
+              }
+          }, [groups]);
+
+          // Initial load notification (if data was found)
+          useEffect(() => {
+              const isDefaultGroup = groups.length === 1 && 
+                                     groups[0].tthLBL === initialMetricValue && 
+                                     groups[0].tthIn === initialMetricValue;
+              if (!isDefaultGroup) {
+                   setExportStatus("Data loaded successfully from your browser's offline storage.");
+              }
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          }, []);
+          // --- END LOCAL STORAGE EFFECT ---
+
+
+          const computedGroups = useMemo(() => {
+            return groups.map(calculateGroupMetrics);
+          }, [groups]);
+
+          const grandTotals = useMemo(() => {
+            return computedGroups.reduce((acc, group) => {
+              const getNum = (val) => parseFloat(val) || 0; 
+              
+              acc.tthIn += getNum(group.tthIn);
+              acc.tthOut += getNum(group.tthOut);
+              acc.tthCode += getNum(group.tthCode);
+              acc.tth107 += getNum(group.tth107);
+              acc.tthVisit += getNum(group.tthVisit);
+
+              acc.ssCode += getNum(group.ssCode);
+              acc.ss107 += getNum(group.ss107);
+              acc.ssVisit += getNum(group.ssVisit);
+
+              // Use ssLBL which tracks the LBL value
+              acc.oldDataTotal += group.ssLBL; 
+              acc.newDataTotal += group.tthNLBL; 
+              
+              return acc;
+            }, {
+              tthIn: 0, tthOut: 0, oldDataTotal: 0, newDataTotal: 0, 
+              tthCode: 0, tth107: 0, tthVisit: 0, 
+              ssCode: 0, ss107: 0, ssVisit: 0
+            });
+          }, [computedGroups]);
+
+          const addGroup = useCallback(() => {
+            const newGroupIndex = groups.length + 1;
+            setGroups(prevGroups => [...prevGroups, createNewGroup(newGroupIndex)]);
+          }, [groups.length]);
+          
+          const deleteGroup = useCallback((idToDelete) => {
+            if (groups.length === 1) {
+              setExportStatus("Cannot delete the last remaining group. Clear data instead if you wish to reset.");
+              return;
+            }
+            setGroups(prevGroups => prevGroups.filter(group => group.id !== idToDelete));
+          }, [groups.length]);
+
+          const updateGroupValue = useCallback((id, field, value) => {
+            setGroups(prevGroups => prevGroups.map(group => {
+              if (group.id === id) {
+                // Ensure number fields store numbers, or strings for empty input
+                const newValue = (field !== 'name' && value !== '') ? value : value;
+                return { ...group, [field]: newValue };
+              }
+              return group;
+            }));
+          }, []);
+          
+          const handleClearData = useCallback(() => setIsClearConfirming(true), []);
+          
+          const confirmClear = useCallback(() => { 
+            setGroups([createNewGroup(1)]); 
+            setIsClearConfirming(false); 
+            // Clear localStorage explicitly on confirmation
+            localStorage.removeItem(STORAGE_KEY);
+            console.log("All group data and localStorage have been cleared."); 
+            setExportStatus("All data cleared successfully. Starting with one empty group."); 
+          }, []);
+          
+          const cancelClear = useCallback(() => setIsClearConfirming(false), []);
+
+          // --- EXPORT TO CSV FUNCTION ---
+          const handleExportToCSV = useCallback(() => {
+            const headers = ["Group Name", "IN", "OUT", "Old Data (LBL)", "New Data (NLBL)", "T.Code", "TTH 107", "TTH Visit", "S.Code", "SS 107", "SS Visit", "TTH GRP%", "SS GRP%", "PGPR%"].join(',');
+            const csvRows = computedGroups.map(group => {
+              const row = [
+                group.name, 
+                group.tthIn, 
+                group.tthOut, 
+                group.tthLBL, 
+                group.tthNLBL.toFixed(2), 
+                group.tthCode, 
+                group.tth107,
+                group.tthVisit,
+                group.ssCode, 
+                group.ss107,
+                group.ssVisit,
+                group.tthGrpPercent.toFixed(2), 
+                group.ssGrpPercent.toFixed(2), 
+                group.pgprPercent.toFixed(2),
+              ];
+              return row.map(String).join(',');
+            });
+
+            const csvContent = [headers, ...csvRows].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+
+            link.setAttribute('href', url);
+            link.setAttribute('download', `GCM_Metrics_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+            link.style.visibility = 'hidden';
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url); 
+
+            setExportStatus("Successfully exported data as a **CSV file**.\n\n" +
+                            "Check your device's **Downloads** folder for the file.");
+          }, [computedGroups]);
+          // --- END EXPORT TO CSV FUNCTION ---
+
+          // --- EXPORT TO JPEG FUNCTION ---
+          const handleExportToJPG = useCallback(() => {
+              const element = dataToCaptureRef.current;
+              if (!element) {
+                  setExportStatus("Error: Could not find data to export.");
+                  return;
+              }
+              
+              setExportStatus("Generating high-resolution JPEG image... Please wait, this may take a moment.");
+
+              // Use html2canvas to capture the hidden element
+              html2canvas(element, {
+                  scale: 2, // Capture at 2x resolution for better quality
+                  useCORS: true,
+                  backgroundColor: null // Use the background set on the element itself
+              }).then(canvas => {
+                  const link = document.createElement('a');
+                  // Convert canvas to JPEG format with 0.9 quality
+                  const jpegUrl = canvas.toDataURL('image/jpeg', 0.9); 
+                  link.href = jpegUrl;
+                  link.download = `GCM_Metrics_Report_${new Date().toISOString().slice(0, 10)}.jpeg`;
+                  
+                  // Trigger download
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  
+                  setExportStatus("Successfully exported all data as a **JPEG image**.\n\n" +
+                                  "Check your device's **Downloads** folder for the image.");
+              }).catch(error => {
+                  console.error("html2canvas failed:", error);
+                  setExportStatus("Error: Failed to generate JPEG image. See console for details.");
+              });
+          }, []);
+          // --- END EXPORT TO JPEG FUNCTION ---
+
+          // --- File Import logic ---
+          const handleFileChange = useCallback((event) => {
+              const file = event.target.files[0];
+              if (!file) return;
+
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                  const csvText = e.target.result;
+                  const newGroups = parseCSV(csvText);
+                  
+                  if (newGroups) {
+                      setGroups(newGroups);
+                      // The useEffect hook automatically saves these new groups to localStorage
+                      setExportStatus(`Successfully imported ${newGroups.length} groups from **${file.name}**. Data is now saved offline.`);
+                  } else {
+                      setExportStatus("Failed to parse CSV. Check file format and try again.");
+                  }
+              };
+              reader.onerror = () => {
+                  setExportStatus("Error reading file during import.");
+              };
+              reader.readAsText(file);
+              
+              // Clear the input value so the same file can be imported again
+              event.target.value = null; 
+          }, []);
+          // --- End File Import logic ---
+          
+          const handleViewAllData = useCallback(() => {
+              setIsViewingAllData(true);
+          }, []);
+
+
+          const dataTableProps = {
+            groups: computedGroups,
+            totals: grandTotals,
+            updateGroupValue: updateGroupValue,
+            deleteGroup: deleteGroup,
+          };
+          
+          const tabs = [
+            { name: 'TTH', component: <DataTable {...dataTableProps} tableType="TTH" /> },
+            { name: 'SS', component: <DataTable {...dataTableProps} tableType="SS" /> },
+            { name: 'PGPR%', component: <PGPRTable groups={computedGroups} totals={grandTotals} /> },
+          ];
+
+
+          return (
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-8 font-sans transition-colors duration-500">
+              {exportStatus && <Notification message={exportStatus} onClose={() => setExportStatus(null)} />}
+              
+              {/* Hidden element to render the data for high-quality JPEG capture */}
+              <div className="absolute left-[-9999px]">
+                <DataForExport 
+                  ref={dataToCaptureRef} 
+                  groups={computedGroups} 
+                  totals={grandTotals} 
+                  theme={theme}
+                />
+              </div>
+
+              <div className="max-w-6xl mx-auto">
+                <div className="flex justify-between items-center mb-6">
+                    <h1 className="text-3xl font-extrabold text-gray-900 dark:text-gray-100 border-b-4 border-blue-500 pb-2 flex-grow text-center">
+                        GCM Metric Calculator
+                    </h1>
+                    <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
+                        {/* THEME SWITCH REMAINS */}
+                        <ThemeSwitch theme={theme} toggleTheme={toggleTheme} />
+                    </div>
+                </div>
+
+                <div className="mb-8 flex flex-col space-y-4 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg transition-colors duration-500">
+                  
+                  {/* Active Groups Display */}
+                  <div className="flex flex-wrap items-center gap-2 border-b dark:border-gray-700 pb-4">
+                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400 self-center">Active Groups:</span>
+                    {groups.map(group => (
+                        <span key={group.id} className="text-sm font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 px-3 py-1 rounded-full">{group.name}</span>
+                    ))}
+                  </div>
+
+                  {/* ACTION BUTTONS GRID - Made equal size using grid layout */}
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
+                    
+                    {/* Clear All Data */}
+                    <button onClick={handleClearData} 
+                        className="w-full h-full px-4 py-3 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600 transition duration-200 text-sm sm:text-base">
+                        Clear All Data
+                    </button>
+                    
+                    {/* Export Data (CSV) */}
+                    <button onClick={handleExportToCSV} 
+                        className="w-full h-full px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-200 text-sm sm:text-base" 
+                        title="Export data as a downloadable CSV file">
+                        Export Data (CSV)
+                    </button>
+                    
+                    {/* IMPORT ELEMENT (Wrapped in a label to look like a button) */}
+                    <label htmlFor="csv-upload" className="w-full h-full text-sm sm:text-base cursor-pointer">
+                        <input type="file" id="csv-upload" onChange={handleFileChange} accept=".csv, text/csv" className="sr-only" /> 
+                        <span className="block text-center h-full px-4 py-3 flex items-center justify-center bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-200">
+                            Import Data
+                        </span>
+                    </label>
+
+                    {/* View All Data */}
+                    <button onClick={handleViewAllData} 
+                        className="w-full h-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-200 text-sm sm:text-base">
+                        View All Data
+                    </button>
+                    
+                    {/* Export to JPEG Button */}
+                    <button onClick={handleExportToJPG} 
+                        className="w-full h-full px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-200 text-sm sm:text-base" 
+                        title="Export all data as an image">
+                        Export Data (JPEG)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirmation Modal for Clearing Data */}
+                {isClearConfirming && (
+                    <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl max-w-sm w-full transition-colors duration-500">
+                            <h3 className="text-xl font-bold text-red-600 mb-4 dark:text-red-400">Confirm Clear Data</h3>
+                            <p className="text-gray-700 dark:text-gray-300 mb-6">Are you absolutely sure you want to clear all input data? This will also remove the data from your **browser's offline storage** and cannot be reversed.</p>
+                            <div className="flex justify-end space-x-3">
+                                <button onClick={cancelClear} className="px-4 py-2 bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-gray-100 font-semibold rounded-lg hover:bg-gray-400 dark:hover:bg-gray-500 transition">Cancel</button>
+                                <button onClick={confirmClear} className="px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition">Yes, Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {isViewingAllData && (
+                  <ViewAllDataModal 
+                    groups={computedGroups} 
+                    totals={grandTotals} 
+                    onClose={() => setIsViewingAllData(false)} 
+                  />
+                )}
+
+                {/* Metric Totals Section */}
+                <div className="flex justify-center mb-4">
+                  <div className="flex flex-wrap gap-4 justify-center">
+                    <div className="text-center p-4 rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 w-full sm:w-48 transition-colors duration-500">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Old Data (LBL)</p>
+                      <p className="text-2xl font-bold text-blue-800 dark:text-blue-400">{grandTotals.oldDataTotal.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-4 rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 w-full sm:w-48 transition-colors duration-500">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Total New Data (NLBL)</p>
+                      <p className="text-2xl font-bold text-purple-800 dark:text-purple-400">{grandTotals.newDataTotal.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Add List Row - Placed below Totals, Above Tabs */}
+                <div className="flex justify-between items-center mb-6 px-4 sm:px-0">
+                    <button
+                        onClick={addGroup}
+                        className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl shadow-lg hover:bg-blue-700 dark:bg-blue-800 dark:hover:bg-blue-700 transition duration-200 whitespace-nowrap"
+                        title="Add a new group list"
+                    >
+                        Add List
+                    </button>
+                    <button
+                        onClick={addGroup}
+                        className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl shadow-lg hover:bg-blue-700 dark:bg-blue-800 dark:hover:bg-blue-700 transition duration-200 whitespace-nowrap"
+                        title="Add a new group list"
+                    >
+                        Add List
+                    </button>
+                </div>
+
+
+                <div className="mb-4 border-b border-gray-200 dark:border-gray-700">
+                  <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.name}
+                        onClick={() => setActiveTab(tab.name)}
+                        className={`
+                          ${activeTab === tab.name
+                              ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400'
+                              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600'
+                          }
+                          whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition duration-150
+                        `}
+                        aria-current={activeTab === tab.name ? 'page' : undefined}
+                      >
+                        {tab.name}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+
+                <div className="mt-6">
+                  {tabs.find(tab => tab.name === activeTab)?.component}
+                </div>
+              </div>
+            </div>
+          );
+        };
+        // === END METRIC CALCULATOR APP ===
+
+        ReactDOM.render(<MetricApp />, document.getElementById('root'));
+    </script>
+</body>
+</html> 
