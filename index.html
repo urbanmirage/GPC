@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GCM Metric Calculator (Offline)</title>
+    <title>GPC</title>
     <!-- Load Tailwind CSS from CDN for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -111,8 +111,9 @@
         const { useState, useCallback, useMemo, useRef, useEffect } = React;
 
         // === Constants for Local Storage ===
-        const STORAGE_KEY = 'GCM_METRICS_DATA'; // Key for metric data
-        const THEME_KEY = 'GCM_THEME_PREF';     // Key for theme preference
+        const STORAGE_KEY = 'GPC_METRICS_DATA'; // Key for metric data
+        const THEME_KEY = 'GPC_THEME_PREF';     // Key for theme preference
+        const AUTH_KEY = 'GPC_AUTH_STATE';      // Key for authentication state (session)
 
 
         // === Helper Functions and Initial State ===
@@ -599,7 +600,7 @@
                 className={`p-10 w-[1600px] font-sans transition-colors duration-500 ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'}`}
             >
                 <div className="mb-8">
-                    <h1 className="text-3xl font-extrabold text-blue-700 dark:text-blue-400 mb-2">GCM Metric Calculator - Comprehensive Report</h1>
+                    <h1 className="text-3xl font-extrabold text-blue-700 dark:text-blue-400 mb-2">GPC - Comprehensive Report</h1>
                     <p className="text-sm font-mono text-gray-600 dark:text-gray-400">Report Generated: {new Date().toLocaleString()}</p>
                 </div>
                 <AllDataTable groups={groups} totals={totals} />
@@ -608,7 +609,61 @@
         // --- END COMPONENT ---
 
 
-        // === METRIC CALCULATOR APP (Now the main application) ===
+        // === LOGIN SCREEN ===
+        const LoginScreen = ({ onLogin }) => {
+            const [passcode, setPasscode] = useState('');
+            const [error, setError] = useState(false);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (passcode === 'kdmdmms') {
+                    onLogin();
+                } else {
+                    setError(true);
+                    setPasscode(''); // Clear input on fail
+                }
+            };
+
+            // Set a dark body specifically for login screen to avoid brief flashes
+            useEffect(() => {
+                document.documentElement.classList.remove('dark');
+                document.body.className = "bg-black transition-colors duration-500";
+            }, []);
+
+            return (
+                <div className="min-h-screen bg-black flex flex-col items-center justify-center font-sans">
+                    <div className="text-center">
+                        <h1 className="text-5xl md:text-7xl font-bold text-white mb-10 tracking-widest">GPC</h1>
+                        <form onSubmit={handleSubmit} className="flex flex-col items-center">
+                            <div className="flex items-center space-x-3">
+                                <input
+                                    type="password"
+                                    value={passcode}
+                                    onChange={(e) => {
+                                        setPasscode(e.target.value);
+                                        setError(false);
+                                    }}
+                                    className="px-4 py-2 bg-gray-900 text-white border border-gray-700 rounded-md focus:outline-none focus:border-gray-500 transition-colors w-48 text-center tracking-widest"
+                                    autoFocus
+                                    placeholder="passcode"
+                                />
+                                <button
+                                    type="submit"
+                                    className="px-5 py-2 bg-gray-800 text-white font-medium rounded-md hover:bg-gray-700 border border-gray-700 transition-colors"
+                                >
+                                    go
+                                </button>
+                            </div>
+                            {error && <p className="text-red-500 text-sm mt-4">Incorrect passcode</p>}
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+        // === END LOGIN SCREEN ===
+
+
+        // === METRIC CALCULATOR APP ===
         const MetricApp = () => {
           // --- THEME STATE (Moved here from AuthApp) ---
           const [theme, setTheme] = useState(localStorage.getItem(THEME_KEY) || 'light');
@@ -629,8 +684,7 @@
                   document.documentElement.classList.remove('dark');
               }
               // Set body background based on the theme
-              document.body.classList.toggle('bg-gray-900', theme === 'dark');
-              document.body.classList.toggle('bg-gray-50', theme === 'light');
+              document.body.className = theme === 'dark' ? 'bg-gray-900 transition-colors duration-500' : 'bg-gray-50 transition-colors duration-500';
           }, [theme]);
           // --- END THEME STATE ---
 
@@ -766,7 +820,7 @@
             const url = URL.createObjectURL(blob);
 
             link.setAttribute('href', url);
-            link.setAttribute('download', `GCM_Metrics_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+            link.setAttribute('download', `GPC_Export_${new Date().toISOString().slice(0, 10)}.csv`);
             link.style.visibility = 'hidden';
 
             document.body.appendChild(link);
@@ -799,7 +853,7 @@
                   // Convert canvas to JPEG format with 0.9 quality
                   const jpegUrl = canvas.toDataURL('image/jpeg', 0.9); 
                   link.href = jpegUrl;
-                  link.download = `GCM_Metrics_Report_${new Date().toISOString().slice(0, 10)}.jpeg`;
+                  link.download = `GPC_Report_${new Date().toISOString().slice(0, 10)}.jpeg`;
                   
                   // Trigger download
                   document.body.appendChild(link);
@@ -863,7 +917,7 @@
 
 
           return (
-            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-8 font-sans transition-colors duration-500">
+            <div className="min-h-screen p-4 sm:p-8 font-sans transition-colors duration-500">
               {exportStatus && <Notification message={exportStatus} onClose={() => setExportStatus(null)} />}
               
               {/* Hidden element to render the data for high-quality JPEG capture */}
@@ -878,11 +932,10 @@
 
               <div className="max-w-6xl mx-auto">
                 <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-3xl font-extrabold text-gray-900 dark:text-gray-100 border-b-4 border-blue-500 pb-2 flex-grow text-center">
-                        GCM Metric Calculator
+                    <h1 className="text-3xl font-extrabold text-gray-900 dark:text-gray-100 border-b-4 border-blue-500 pb-2 flex-grow text-center tracking-widest">
+                        GPC
                     </h1>
                     <div className="ml-4 flex-shrink-0 flex items-center space-x-4">
-                        {/* THEME SWITCH REMAINS */}
                         <ThemeSwitch theme={theme} toggleTheme={toggleTheme} />
                     </div>
                 </div>
@@ -897,23 +950,20 @@
                     ))}
                   </div>
 
-                  {/* ACTION BUTTONS GRID - Made equal size using grid layout */}
+                  {/* ACTION BUTTONS GRID */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
                     
-                    {/* Clear All Data */}
                     <button onClick={handleClearData} 
                         className="w-full h-full px-4 py-3 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600 transition duration-200 text-sm sm:text-base">
                         Clear All Data
                     </button>
                     
-                    {/* Export Data (CSV) */}
                     <button onClick={handleExportToCSV} 
                         className="w-full h-full px-4 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-200 text-sm sm:text-base" 
                         title="Export data as a downloadable CSV file">
                         Export Data (CSV)
                     </button>
                     
-                    {/* IMPORT ELEMENT (Wrapped in a label to look like a button) */}
                     <label htmlFor="csv-upload" className="w-full h-full text-sm sm:text-base cursor-pointer">
                         <input type="file" id="csv-upload" onChange={handleFileChange} accept=".csv, text/csv" className="sr-only" /> 
                         <span className="block text-center h-full px-4 py-3 flex items-center justify-center bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-200">
@@ -921,13 +971,11 @@
                         </span>
                     </label>
 
-                    {/* View All Data */}
                     <button onClick={handleViewAllData} 
                         className="w-full h-full px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-200 text-sm sm:text-base">
                         View All Data
                     </button>
                     
-                    {/* Export to JPEG Button */}
                     <button onClick={handleExportToJPG} 
                         className="w-full h-full px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-200 text-sm sm:text-base" 
                         title="Export all data as an image">
@@ -1021,7 +1069,27 @@
         };
         // === END METRIC CALCULATOR APP ===
 
-        ReactDOM.render(<MetricApp />, document.getElementById('root'));
+        // === MAIN APP (Handles Authentication state) ===
+        const App = () => {
+            const [isAuthenticated, setIsAuthenticated] = useState(() => {
+                // Keep the session authenticated across page reloads (in current tab)
+                return sessionStorage.getItem(AUTH_KEY) === 'true';
+            });
+
+            const handleLogin = () => {
+                setIsAuthenticated(true);
+                sessionStorage.setItem(AUTH_KEY, 'true');
+            };
+
+            if (!isAuthenticated) {
+                return <LoginScreen onLogin={handleLogin} />;
+            }
+
+            return <MetricApp />;
+        };
+        // === END MAIN APP ===
+
+        ReactDOM.render(<App />, document.getElementById('root'));
     </script>
 </body>
-</html> 
+</html>
